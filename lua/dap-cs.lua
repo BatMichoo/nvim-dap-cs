@@ -149,6 +149,9 @@ local setup_configuration = function(dap, dap_utils, config)
 				local current_working_dir = vim.fn.getcwd()
 				return select_dll(current_working_dir) or dap.ABORT
 			end,
+			env = {
+				ASPNETCORE_ENVIRONMENT = "Development",
+			},
 		},
 		{
 			type = "coreclr",
@@ -183,9 +186,6 @@ local setup_adapter = function(dap, config)
 		type = "executable",
 		command = config.netcoredbg.path,
 		args = { "--interpreter=vscode" },
-		env = {
-			ASPNETCORE_ENVIRONMENT = "Development",
-		},
 	}
 end
 
