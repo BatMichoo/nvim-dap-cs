@@ -21,18 +21,17 @@ local number_indices = function(array)
 end
 
 local display_options = function(prompt_title, options)
-  options = number_indices(options)
-  table.insert(options, 1, prompt_title)
+  local display_list = number_indices(options)
+  table.insert(display_list, 1, prompt_title)
 
-  local choice = vim.fn.inputlist(options)
+  local choice = vim.fn.inputlist(display_list)
 
   if choice > 0 then
-    return options[choice + 1]
+    return options[choice]
   else
     return nil
   end
 end
-
 
 local file_selection = function(cmd, opts)
   local results = vim.fn.systemlist(cmd)
@@ -57,35 +56,36 @@ end
 local project_selection = function(project_path, allow_multiple)
   local check_csproj_cmd = string.format('find %s -type f -name "*.csproj"', project_path)
   local project_file = file_selection(check_csproj_cmd, {
-    empty_message = 'No csproj files found in ' .. project_path,
-    multiple_title_message = 'Select project:',
-    allow_multiple = allow_multiple
+    empty_message = "No csproj files found in " .. project_path,
+    multiple_title_message = "Select project:",
+    allow_multiple = allow_multiple,
+    are_projects = true,
   })
   return project_file
 end
 
-local select_dll = function(project_path)
-  local bin_path = project_path .. '/bin'
-
-  local check_net_folders_cmd = string.format('find %s -type d -name "net*"', bin_path)
-  local net_bin = file_selection(check_net_folders_cmd, {
-    empty_message = 'No dotnet directories found in the "bin" directory. Ensure project has been built.',
-    multiple_title_message = "Select NET Version:"
-  })
-  if net_bin == nil then
-    return
-  end
-
-  local project_file = project_selection(project_path)
+local select_dll = function(cwd)
+  local project_file = project_selection(cwd)
   if project_file == nil then
     return
   end
+
   local project_name = vim.fn.fnamemodify(project_file, ":t:r")
 
-  local dll_path = net_bin .. '/' .. project_name .. '.dll'
+  local project_path = vim.fn.fnamemodify(project_file, ":h")
+  local bin_path = project_path .. "/bin"
+  local check_net_folders_cmd = string.format('find %s -maxdepth 2 -type d -name "net*"', bin_path)
+  local net_bin = file_selection(check_net_folders_cmd, {
+    empty_message = 'No dotnet directories found in the "bin" directory. Ensure project has been built.',
+    multiple_title_message = "Select NET Version:",
+  })
+
+  if net_bin == nil then
+    return
+  end
+  local dll_path = net_bin .. "/" .. project_name .. ".dll"
   return dll_path
 end
-
 
 --- Attempts to pick a process smartly.
 ---
@@ -127,7 +127,7 @@ local smart_pick_process = function(dap_utils, project_path)
 
   if #processes > 1 then
     return dap_utils.pick_process({
-      filter = filter
+      filter = filter,
     })
   end
 
@@ -163,7 +163,6 @@ local setup_configuration = function(dap, dap_utils, config)
     },
   }
 
-
   if config == nil or config.dap_configurations == nil then
     return
   end
@@ -177,9 +176,9 @@ end
 
 local setup_adapter = function(dap, config)
   dap.adapters.coreclr = {
-    type = 'executable',
+    type = "executable",
     command = config.netcoredbg.path,
-    args = { '--interpreter=vscode' }
+    args = { "--interpreter=vscode" },
   }
 end
 
