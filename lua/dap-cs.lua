@@ -6,7 +6,7 @@ local default_config = {
 	},
 }
 
-local cwd = {
+local current_dir = {
 	current = "",
 }
 
@@ -162,7 +162,7 @@ local setup_configuration = function(dap, dap_utils, config)
 			env = {
 				ASPNETCORE_ENVIRONMENT = "Development",
 			},
-			cwd = cwd.current,
+			cwd = current_dir.current,
 		},
 		{
 			type = "coreclr",
