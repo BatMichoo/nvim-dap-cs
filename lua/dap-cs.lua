@@ -4,10 +4,9 @@ local default_config = {
   netcoredbg = {
     path = "netcoredbg",
   },
-}
-
-local current_dir = {
-  current = "",
+  current_dir = {
+    current = "",
+  },
 }
 
 local load_module = function(module_name)
@@ -86,12 +85,13 @@ local select_dll = function(cwd)
     multiple_title_message = "Select .NET Version:",
   })
 
+  vim.cmd(":cd project_path")
+
   if net_bin == nil then
     return
   end
   local dll_path = net_bin .. "/" .. project_name .. ".dll"
   current_dir.current = project_path
-  print(current_dir.current)
   return dll_path
 end
 
@@ -154,10 +154,6 @@ local setup_configuration = function(dap, dap_utils, config)
 
         return dll_path or dap.ABORT
       end,
-      env = {
-        ASPNETCORE_ENVIRONMENT = "Development",
-      },
-      cwd = "ABCD",
     },
     {
       type = "coreclr",
@@ -192,6 +188,12 @@ local setup_adapter = function(dap, config)
     type = "executable",
     command = config.netcoredbg.path,
     args = { "--interpreter=vscode" },
+    options = {
+      env = {
+        ASPNETCORE_ENVIRONMENT = "Development",
+      },
+      cwd = "${fileDirname}",
+    },
   }
 end
 
