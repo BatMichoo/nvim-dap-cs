@@ -135,7 +135,7 @@ local select_project = function(cwd, allow_multiple)
   end
 
   local project_file = select_file(startup_projects, {
-    empty_message = 'No start up csproj files found in ' .. cwd,
+    empty_message = 'No start up csproj files found in ' .. cwd .. '.\nIs the project built?',
     title_message = 'Select .NET Project:',
     allow_multiple = allow_multiple,
   })
@@ -244,6 +244,10 @@ local select_dll = function()
     end)
   else
     project_root = choose_startup_project(cwd)
+  end
+
+  if not project_root then
+    return
   end
 
   local project_name = vim.fn.fnamemodify(project_root, ':t:r')
