@@ -2,9 +2,14 @@
 --- @brief A Neovim plugin for debugging C# projects with `netcoredbg`.
 ---
 --- This module provides an intelligent set of debug configurations for C# projects,
---- including automatically selecting and attaching to .NET processes.
+--- including automatically selecting and attaching to .NET processes and parsing `launchSettings.json`
+--- to configure the debugger.
 local M = {}
 
+--- @section Plugin Configuration
+--- @field netcoredbg table The configuration for the `netcoredbg` executable.
+--- @field netcoredbg.path string The path to the `netcoredbg` executable. Defaults to 'netcoredbg'.
+--- @field dap_configurations table[] A list of additional DAP configurations to be added to the 'cs' filetype.
 local default_config = {
   netcoredbg = {
     path = 'netcoredbg',
@@ -14,30 +19,50 @@ local default_config = {
 --- @brief A helper function to safely load a Neovim module.
 --- @param module_name string The name of the module to load, e.g., 'dap'.
 --- @return table module The loaded module.
---- @throws An error if the module is not found.
+--- @throws string An error message if the module is not found.
 local load_module = function(module_name)
   local ok, module = pcall(require, module_name)
   assert(ok, string.format('dap-cs dependency error: %s not installed', module_name))
   return module
 end
 
---- @brief Prepends a numerical index and the file name (without extension) to each entry in an array of file paths.
+--- @brief Extracts the .NET version from a file path ending in `.dll`.
+--- @param path string The file path to inspect.
+--- @return string|nil The name of the .NET version folder (e.g., 'net8.0') or nil if not found.
+local function get_net_version(path)
+  -- The pattern to match and capture the .NET version.
+  -- The pattern assumes the .NET version folder is located directly before the DLL name.
+  local pattern = '(net%d+%.%d)/[^/]+%.dll$'
+  local net_folder_name = string.match(path, pattern)
+
+  return net_folder_name
+end
+
+--- @brief Prepends a numerical index and the file name to each entry in an array of file paths.
+--- If the file path is a .NET DLL, it formats the entry to show the .NET version.
 --- @param array string[] A list of file paths.
 --- @return string[] result A new list with numerically indexed file names.
 local number_indicies = function(array)
   local result = {}
   for i, value in ipairs(array) do
-    result[i] = i .. ': ' .. vim.fn.fnamemodify(value, ':t:r')
+    local dotnet_version = get_net_version(value)
+    if dotnet_version then
+      result[i] = i .. ': ' .. dotnet_version
+    else
+      result[i] = i .. ': ' .. vim.fn.fnamemodify(value, ':t:r')
+    end
   end
   return result
 end
 
---- @brief Presents a numbered list of options to the user for selection via a Neovim input list.
+--- @brief Presents a numbered list of options to the user for selection.
+--- This uses a Neovim input list, which is a blocking prompt.
 --- @param prompt_title string The title to display at the top of the list.
 --- @param options string[] The list of options the user can choose from.
---- @return string|nil choice The selected option or nil if the user cancels.
+--- @return string|nil choice The full selected option string from the `options` table or nil if the user cancels.
 local display_selection = function(prompt_title, options)
   local display_list = number_indicies(options)
+
   table.insert(display_list, 1, prompt_title)
   table.insert(display_list, 2, '')
   table.insert(display_list, #display_list + 1, '')
@@ -51,42 +76,66 @@ local display_selection = function(prompt_title, options)
   end
 end
 
---- @brief Executes a shell command and presents the results to the user for selection.
---- @param cmd string The shell command to execute.
+--- @brief Selects a file or list of files from a set of results.
+--- @param results string|string[] The file path(s) to be selected from.
 --- @param opts table A table of options to customize behavior.
---- @param opts.empty_message string The message to print if no files are found.
---- @param opts.title_message string The title for the selection list if multiple results are found.
---- @param opts.allow_multiple boolean If true, returns all results without prompting for selection.
+--- @field opts.empty_message string A message to print if no files are found.
+--- @field opts.title_message string A title for the selection list if multiple results are found.
+--- @field opts.allow_multiple boolean If true, returns all results without prompting for selection.
 --- @return string|string[]|nil result The selected file path, a list of file paths if `allow_multiple` is true, or nil.
-local select_file = function(cmd, opts)
-  local results = vim.fn.systemlist(cmd)
+local select_file = function(results, opts)
+  if type(results) ~= 'table' then
+    return results
+  end
 
-  if #results == 0 then
-    print(opts.empty_message)
-    return
+  if next(results) == nil then
+    if opts.empty_message then
+      print(opts.empty_message)
+    end
+    return nil
   end
 
   if opts.allow_multiple then
     return results
   end
 
-  local result = results[1]
-  if #results > 1 then
-    result = display_selection(opts.title_message, results)
+  if #results == 1 then
+    return results[1]
   end
 
-  return result
+  if #results > 1 then
+    return display_selection(opts.title_message, results)
+  end
+
+  return nil
 end
 
 --- @brief Searches for C# project files in a given directory and prompts the user for a selection if needed.
---- @param cwd string The directory to search in.
+--- @param cwd string The directory to start the search from.
 --- @param allow_multiple boolean If true, returns all found project files instead of a single selection.
 --- @return string|string[]|nil project_file The selected project file path(s) or nil.
 local select_project = function(cwd, allow_multiple)
-  local check_csproj_cmd = string.format('find %s -type f -name "*.csproj"', cwd)
+  local project_files = vim.fs.find(function(name, path)
+    return name:match '%.csproj$' ~= nil
+  end, { path = cwd, limit = math.huge, type = 'file' })
 
-  local project_file = select_file(check_csproj_cmd, {
-    empty_message = 'No csproj files found in ' .. cwd,
+  local startup_projects = {}
+
+  for _, project in ipairs(project_files) do
+    local project_path = vim.fn.fnamemodify(project, ':h')
+    local project_name = vim.fn.fnamemodify(project, ':t:r')
+
+    local bin_path = project_path .. '/bin/Debug'
+    local startup_config_file = vim.fs.find(string.format('%s.runtimeconfig.json', project_name),
+      { path = bin_path, type = 'file' })
+
+    if next(startup_config_file) then
+      table.insert(startup_projects, project)
+    end
+  end
+
+  local project_file = select_file(startup_projects, {
+    empty_message = 'No start up csproj files found in ' .. cwd,
     title_message = 'Select .NET Project:',
     allow_multiple = allow_multiple,
   })
@@ -94,92 +143,140 @@ local select_project = function(cwd, allow_multiple)
   return project_file
 end
 
---- @brief Finds and selects a .NET DLL for a project in the current working directory.
---- This function first selects a project and then locates its corresponding DLL in the `bin` folder.
---- @return string|nil dll_path The path to the selected DLL or nil if no DLL is found.
---- @return string|nil project_path The path to the project directory or nil if no DLL is found.
-local select_dll = function()
-  local cwd = vim.fn.getcwd()
+--- @brief Safely reads the content of a JSON file and returns it as a string.
+--- Handles potential UTF-8 Byte Order Marks (BOMs) that can cause decoding errors.
+--- @param path string The path to the JSON file.
+--- @return string|nil The file content as a string, or nil on failure.
+local function read_json_file(path)
+  local file = io.open(path, 'r')
+  if not file then
+    return nil
+  end
+  local content = file:read '*a'
+  file:close()
+
+  if not content or content == '' then
+    return nil
+  end
+
+  -- BOM escape
+  if content:sub(1, 3) == '\239\187\191' then
+    content = content:sub(4)
+  end
+
+  return content
+end
+
+--- @brief Prompts the user to select a startup project and returns its directory.
+--- @param cwd string The directory to start the search from.
+--- @return string|nil The path to the selected project directory or nil.
+local function choose_startup_project(cwd)
   local project_file = select_project(cwd)
 
   if project_file == nil then
     return
   end
 
-  local project_name = vim.fn.fnamemodify(project_file, ':t:r')
   local project_path = vim.fn.fnamemodify(project_file, ':h')
 
-  local bin_path = project_path .. '/bin'
-  local check_net_folders_cmd = string.format('find %s -maxdepth 2 -type d -name "net*"', bin_path)
-
-  local net_bin = select_file(check_net_folders_cmd, {
-    empty_message = 'No dotnet DLLs found in the "bin" directory. Ensure project has been built.',
-    title_message = 'Select .NET Version:',
-  })
-
-  if net_bin == nil then
-    return
-  end
-
-  local dll_path = net_bin .. '/' .. project_name .. '.dll'
-  return dll_path, project_path
+  return project_path
 end
 
---- @brief Attempts to pick a process smartly.
----
---- Does the following:
---- 1. Gets all project files
---- 2. Build filter
---- 2a. If a single project is found then will filter for processes ending with project name.
---- 2b. If multiple projects found then will filter for processes ending with any of the project file names.
---- 2c. If no project files found then will filter for processes starting with "dotnet"
---- 3. If a single process matches then auto selects it. If multiple found then displays it user for selection.
---- @param dap_utils table The `dap.utils` module containing helper functions.
---- @param cwd string The current working directory.
---- @return number|nil ID The PID of the selected process or nil if no process is found.
-local smart_pick_process = function(dap_utils, cwd)
-  local project_file = select_project(cwd, true)
-  if project_file == nil then
-    return
-  end
+--- @brief Finds and selects a .NET DLL for a project in the current working directory.
+--- This function handles both `launchSettings.json` and console app scenarios.
+--- @return string|nil dll_path The path to the selected DLL or nil.
+--- @return string|nil project_path The path to the project directory or nil.
+--- @return table|nil env_vars The environment variables from `launchSettings.json` or nil.
+local select_dll = function()
+  local lsp_clients = vim.lsp.get_clients()
+  local cwd = nil
 
-  local filter = function(proc)
-    if type(project_file) == 'table' then
-      for _, file in pairs(project_file) do
-        local project_name = vim.fn.fnamemodify(file, ':t:r')
-        if vim.endswith(proc.name, project_name) then
-          return true
-        end
-      end
-      return false
-    elseif type(project_file) == 'string' then
-      local project_name = vim.fn.fnamemodify(project_file, ':t:r')
-      return vim.startswith(proc.name, project_name or 'dotnet')
+  for _, client in pairs(lsp_clients) do
+    if client.name == 'roslyn' or client.name == 'omnisharp' then
+      cwd = client.config.root_dir
+      break
     end
   end
 
-  local processes = dap_utils.get_processes()
-  processes = vim.tbl_filter(filter, processes)
+  if not cwd then
+    cwd = vim.fn.getcwd()
+  end
 
-  if #processes == 0 then
-    print "No dotnet processes could be found automatically. Try 'Attach' instead"
+  local launch_settings_file = vim.fs.find('launchSettings.json', { path = cwd, type = 'file' })
+  local project_root = nil
+  local env_vars = nil
+
+  if next(launch_settings_file) then
+    local settings_file_path = launch_settings_file[1]
+    local json_string = read_json_file(settings_file_path)
+    if not json_string then
+      print 'Error: Could not read launchSettings.json.'
+      return
+    end
+
+    local launch_settings = require('cjson').decode(json_string)
+
+    local selected_profile = nil
+    if launch_settings and launch_settings.profiles then
+      for _, profile in pairs(launch_settings.profiles) do
+        if profile.commandName == 'Project' then
+          selected_profile = profile
+          break
+        end
+      end
+    end
+
+    if not selected_profile then
+      print "Error: Could not find a 'Project' launch profile."
+      return
+    end
+
+    env_vars = selected_profile.environmentVariables or {
+      ASPNETCORE_ENVIRONMENT = 'Development',
+    }
+
+    if selected_profile.applicationUrl then
+      env_vars.ASPNETCORE_URLS = selected_profile.applicationUrl
+    end
+
+    project_root = vim.fs.root(vim.fs.dirname(settings_file_path), function(name, path)
+      return name:match '%.csproj$' ~= nil
+    end)
+  else
+    project_root = choose_startup_project(cwd)
+  end
+
+  local project_name = vim.fn.fnamemodify(project_root, ':t:r')
+
+  local dll_root = project_root .. '/bin/Debug'
+  local dll_file = vim.fs.find(string.format('%s.dll', project_name),
+    { path = dll_root, limit = math.huge, type = 'file' })
+
+  local dll_path = nil
+
+  if next(dll_file) then
+    if #dll_file > 1 then
+      dll_path = select_file(dll_file, {
+        empty_message = 'No dotnet DLLs found in the "bin" directory. Ensure project has been built.',
+        title_message = 'Select .NET Version:',
+      })
+    else
+      dll_path = dll_file[1]
+    end
+  else
+    print 'Could not find DLL'
     return
   end
 
-  if #processes > 1 then
-    return dap_utils.pick_process {
-      filter = filter,
-    }
-  end
-
-  return processes[1].pid
+  return dll_path, project_root, env_vars
 end
 
 --- @brief Sets up the coreclr debug configurations for C# in Neovim's DAP.
---- It defines "Launch Project", "Attach to Process", and "Smart Attach" configurations.
+--- It defines "Launch Project" and "Attach to Process" configurations.
 --- @param dap table The `dap` module.
 --- @param dap_utils table The `dap.utils` module.
 --- @param config table The plugin configuration table.
+--- @field config.dap_configurations table[] A list of additional DAP configurations.
 local setup_configuration = function(dap, dap_utils, config)
   dap.configurations.cs = {
     setmetatable({
@@ -187,15 +284,14 @@ local setup_configuration = function(dap, dap_utils, config)
       name = 'Launch Project',
       request = 'launch',
       program = '${file}',
-      env = {
-        ASPNETCORE_ENVIRONMENT = 'Development',
-      },
       cwd = '${fileDirname}',
+      env = {},
     }, {
       __call = function(config)
-        local dll_path, project_path = select_dll()
+        local dll_path, project_path, env_vars = select_dll()
         config.cwd = project_path
         config.program = dll_path or dap.ABORT
+        config.env = env_vars
         return config
       end,
     }),
@@ -204,15 +300,6 @@ local setup_configuration = function(dap, dap_utils, config)
       name = 'Attach to Process',
       request = 'attach',
       processId = dap_utils.pick_process,
-    },
-    {
-      type = 'coreclr',
-      name = 'Smart Attach',
-      request = 'attach',
-      processId = function()
-        local current_working_dir = vim.fn.getcwd()
-        return smart_pick_process(dap_utils, current_working_dir) or dap.ABORT
-      end,
     },
   }
 
@@ -229,27 +316,31 @@ end
 
 --- @brief Sets up the `coreclr` debug adapter for Neovim's DAP.
 --- @param dap table The `dap` module.
---- @param config table The plugin configuration table, including the path to `netcoredbg`.
+--- @param config table The plugin configuration table.
+--- @field config.netcoredbg table The configuration for the `netcoredbg` executable.
+--- @field config.netcoredbg.path string The path to the `netcoredbg` executable.
 local setup_adapter = function(dap, config)
-  dap.adapters.coreclr = {
+  local adapter = {
     type = 'executable',
     command = config.netcoredbg.path,
     args = { '--interpreter=vscode' },
   }
-  dap.adapters.netcoredbg = {
-    type = 'executable',
-    command = config.netcoredbg.path,
-    args = { '--interpreter=vscode' },
-  }
+
+  dap.adapters.coreclr = adapter
+  dap.adapters.netcoredbg = adapter
 end
 
 --- @brief The main entry point for setting up the debugger plugin.
 --- This function merges user options with defaults, loads dependencies, and sets up the DAP adapter and configurations.
 --- @param opts table A table of user options to override the defaults.
+--- @field opts.netcoredbg table Configuration for `netcoredbg` path.
+--- @field opts.netcoredbg.path string Path to the `netcoredbg` executable.
+--- @field opts.dap_configurations table[] Optional list of additional configurations to add to the 'cs' filetype.
 function M.setup(opts)
   local config = vim.tbl_deep_extend('force', default_config, opts or {})
   local dap = load_module 'dap'
   local dap_utils = load_module 'dap.utils'
+  load_module 'cjson'
   setup_adapter(dap, config)
   setup_configuration(dap, dap_utils, config)
 end
