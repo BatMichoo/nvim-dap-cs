@@ -214,7 +214,7 @@ local select_dll = function()
       return
     end
 
-    local launch_settings = require('cjson').decode(json_string)
+    local launch_settings = vim.json.decode(json_string)
 
     local selected_profile = nil
     if launch_settings and launch_settings.profiles then
