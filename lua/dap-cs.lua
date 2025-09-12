@@ -40,7 +40,7 @@ end
 --- If the file path is a .NET DLL, it formats the entry to show the .NET version.
 --- @param array string[] A list of file paths.
 --- @return string[] result A new list with numerically indexed file names.
-local number_indicies = function(array)
+local format_for_display = function(array)
   local result = {}
   for i, value in ipairs(array) do
     local dotnet_version = get_net_version(value)
@@ -59,7 +59,7 @@ end
 --- @param options string[] The list of options the user can choose from.
 --- @return string|nil choice The full selected option string from the `options` table or nil if the user cancels.
 local display_selection = function(prompt_title, options)
-  local display_list = number_indicies(options)
+  local display_list = format_for_display(options)
 
   table.insert(display_list, 1, prompt_title)
   table.insert(display_list, 2, '')
@@ -121,7 +121,7 @@ end
 --- @param cwd string The directory to start the search from.
 --- @param allow_multiple boolean If true, returns all found project files instead of a single selection.
 --- @return string|string[]|nil project_file The selected project file path(s) or nil.
-local select_project = function(cwd, allow_multiple)
+local find_startup_projects = function(cwd, allow_multiple)
   local project_files = vim.fs.find(find_csproj, { path = cwd, limit = math.huge, type = 'file' })
 
   local startup_projects = {}
@@ -139,13 +139,7 @@ local select_project = function(cwd, allow_multiple)
     end
   end
 
-  local project_file = select_file(startup_projects, {
-    empty_message = 'No start up csproj files found in ' .. cwd .. '.\nIs the project built?',
-    title_message = 'Select .NET Project:',
-    allow_multiple = allow_multiple,
-  })
-
-  return project_file
+  return startup_projects
 end
 
 --- @brief Safely reads the content of a JSON file and returns it as a string.
@@ -175,8 +169,14 @@ end
 --- @brief Prompts the user to select a startup project and returns its directory.
 --- @param cwd string The directory to start the search from.
 --- @return string|nil The path to the selected project directory or nil.
-local function choose_startup_project(cwd)
-  local project_file = select_project(cwd)
+local function choose_startup_project_manually(cwd)
+  local startup_projects = find_startup_projects(cwd)
+
+  local project_file = select_file(startup_projects, {
+    empty_message = 'No start up csproj files found in ' .. cwd .. '.\nIs the project built?',
+    title_message = 'Select .NET Project:',
+    allow_multiple = allow_multiple,
+  })
 
   if project_file == nil then
     return
@@ -248,7 +248,7 @@ local select_dll = function()
 
     project_root = vim.fs.root(vim.fs.dirname(settings_file_path), find_csproj)
   else
-    project_root = choose_startup_project(cwd)
+    project_root = choose_startup_project_manually(cwd)
   end
 
   if not project_root then
