@@ -30,8 +30,6 @@ end
 --- @param path string The file path to inspect.
 --- @return string|nil The name of the .NET version folder (e.g., 'net8.0') or nil if not found.
 local function get_net_version(path)
-  -- The pattern to match and capture the .NET version.
-  -- The pattern assumes the .NET version folder is located directly before the DLL name.
   local pattern = '(net%d+%.%d)/[^/]+%.dll$'
   local net_folder_name = string.match(path, pattern)
 
@@ -110,14 +108,21 @@ local select_file = function(results, opts)
   return nil
 end
 
+--- @brief Predicate function to identify a .NET project file (`.csproj`).
+--- This function is intended for use with file system traversal functions like `vim.fs.find()` or `vim.fs.root()`.
+--- @param name string The name of the file to check.
+--- @param path string The full path to the file. This parameter is unused in the function's logic.
+--- @return boolean True if the file name ends with '.csproj', false otherwise.
+local function find_csproj(name, path)
+  return name:match '%.csproj$' ~= nil
+end
+
 --- @brief Searches for C# project files in a given directory and prompts the user for a selection if needed.
 --- @param cwd string The directory to start the search from.
 --- @param allow_multiple boolean If true, returns all found project files instead of a single selection.
 --- @return string|string[]|nil project_file The selected project file path(s) or nil.
 local select_project = function(cwd, allow_multiple)
-  local project_files = vim.fs.find(function(name, path)
-    return name:match '%.csproj$' ~= nil
-  end, { path = cwd, limit = math.huge, type = 'file' })
+  local project_files = vim.fs.find(find_csproj, { path = cwd, limit = math.huge, type = 'file' })
 
   local startup_projects = {}
 
@@ -239,9 +244,9 @@ local select_dll = function()
       env_vars.ASPNETCORE_URLS = selected_profile.applicationUrl
     end
 
-    project_root = vim.fs.root(vim.fs.dirname(settings_file_path), function(name, path)
-      return name:match '%.csproj$' ~= nil
-    end)
+    -- TODO: Room to improve
+
+    project_root = vim.fs.root(vim.fs.dirname(settings_file_path), find_csproj)
   else
     project_root = choose_startup_project(cwd)
   end
@@ -250,7 +255,10 @@ local select_dll = function()
     return
   end
 
-  local project_name = vim.fn.fnamemodify(project_root, ':t:r')
+  local project_path = vim.fs.find(find_csproj, { path = project_root })[1]
+  local project_name = vim.fn.fnamemodify(project_path, ':t:r')
+
+  -- TODO: till here?
 
   local dll_root = project_root .. '/bin/Debug'
   local dll_file = vim.fs.find(string.format('%s.dll', project_name),
