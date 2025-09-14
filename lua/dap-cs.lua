@@ -6,13 +6,18 @@
 --- to configure the debugger.
 local M = {}
 
+local executable = "netcoredbg"
+if vim.fn.has("win32") == 1 then
+  executable = vim.fn.stdpath("data") .. "/mason/packages/netcoredbg/netcoredbg/" .. executable .. ".exe"
+end
+
 --- @section Plugin Configuration
 --- @field netcoredbg table The configuration for the `netcoredbg` executable.
 --- @field netcoredbg.path string The path to the `netcoredbg` executable. Defaults to 'netcoredbg'.
 --- @field dap_configurations table[] A list of additional DAP configurations to be added to the 'cs' filetype.
 local default_config = {
   netcoredbg = {
-    path = 'netcoredbg',
+    path = executable,
   },
 }
 
@@ -22,7 +27,7 @@ local default_config = {
 --- @throws string An error message if the module is not found.
 local load_module = function(module_name)
   local ok, module = pcall(require, module_name)
-  assert(ok, string.format('dap-cs dependency error: %s not installed', module_name))
+  assert(ok, string.format("dap-cs dependency error: %s not installed", module_name))
   return module
 end
 
@@ -30,7 +35,7 @@ end
 --- @param path string The file path to inspect.
 --- @return string|nil The name of the .NET version folder (e.g., 'net8.0') or nil if not found.
 local function get_net_version(path)
-  local pattern = '(net%d+%.%d)/[^/]+%.dll$'
+  local pattern = "(net%d+%.%d)/[^/]+%.dll$"
   local net_folder_name = string.match(path, pattern)
 
   return net_folder_name
@@ -45,9 +50,9 @@ local format_for_display = function(array)
   for i, value in ipairs(array) do
     local dotnet_version = get_net_version(value)
     if dotnet_version then
-      result[i] = i .. ': ' .. dotnet_version
+      result[i] = i .. ": " .. dotnet_version
     else
-      result[i] = i .. ': ' .. vim.fn.fnamemodify(value, ':t:r')
+      result[i] = i .. ": " .. vim.fn.fnamemodify(value, ":t:r")
     end
   end
   return result
@@ -62,8 +67,8 @@ local display_selection = function(prompt_title, options)
   local display_list = format_for_display(options)
 
   table.insert(display_list, 1, prompt_title)
-  table.insert(display_list, 2, '')
-  table.insert(display_list, #display_list + 1, '')
+  table.insert(display_list, 2, "")
+  table.insert(display_list, #display_list + 1, "")
 
   local choice = vim.fn.inputlist(display_list)
 
@@ -82,7 +87,7 @@ end
 --- @field opts.allow_multiple boolean If true, returns all results without prompting for selection.
 --- @return string|string[]|nil result The selected file path, a list of file paths if `allow_multiple` is true, or nil.
 local select_file = function(results, opts)
-  if type(results) ~= 'table' then
+  if type(results) ~= "table" then
     return results
   end
 
@@ -114,7 +119,7 @@ end
 --- @param path string The full path to the file. This parameter is unused in the function's logic.
 --- @return boolean True if the file name ends with '.csproj', false otherwise.
 local function find_csproj(name, path)
-  return name:match '%.csproj$' ~= nil
+  return name:match("%.csproj$") ~= nil
 end
 
 --- @brief Searches for C# project files in a given directory and prompts the user for a selection if needed.
@@ -122,17 +127,17 @@ end
 --- @param allow_multiple boolean If true, returns all found project files instead of a single selection.
 --- @return string|string[]|nil project_file The selected project file path(s) or nil.
 local find_startup_projects = function(cwd, allow_multiple)
-  local project_files = vim.fs.find(find_csproj, { path = cwd, limit = math.huge, type = 'file' })
+  local project_files = vim.fs.find(find_csproj, { path = cwd, limit = math.huge, type = "file" })
 
   local startup_projects = {}
 
   for _, project in ipairs(project_files) do
-    local project_path = vim.fn.fnamemodify(project, ':h')
-    local project_name = vim.fn.fnamemodify(project, ':t:r')
+    local project_path = vim.fn.fnamemodify(project, ":h")
+    local project_name = vim.fn.fnamemodify(project, ":t:r")
 
-    local bin_path = project_path .. '/bin/Debug'
-    local startup_config_file = vim.fs.find(string.format('%s.runtimeconfig.json', project_name),
-      { path = bin_path, type = 'file' })
+    local bin_path = project_path .. "/bin/Debug"
+    local startup_config_file =
+        vim.fs.find(string.format("%s.runtimeconfig.json", project_name), { path = bin_path, type = "file" })
 
     if next(startup_config_file) then
       table.insert(startup_projects, project)
@@ -147,19 +152,19 @@ end
 --- @param path string The path to the JSON file.
 --- @return string|nil The file content as a string, or nil on failure.
 local function read_json_file(path)
-  local file = io.open(path, 'r')
+  local file = io.open(path, "r")
   if not file then
     return nil
   end
-  local content = file:read '*a'
+  local content = file:read("*a")
   file:close()
 
-  if not content or content == '' then
+  if not content or content == "" then
     return nil
   end
 
   -- BOM escape
-  if content:sub(1, 3) == '\239\187\191' then
+  if content:sub(1, 3) == "\239\187\191" then
     content = content:sub(4)
   end
 
@@ -173,8 +178,8 @@ local function choose_startup_project_manually(cwd)
   local startup_projects = find_startup_projects(cwd)
 
   local project_file = select_file(startup_projects, {
-    empty_message = 'No start up csproj files found in ' .. cwd .. '.\nIs the project built?',
-    title_message = 'Select .NET Project:',
+    empty_message = "No start up csproj files found in " .. cwd .. ".\nIs the project built?",
+    title_message = "Select .NET Project:",
     allow_multiple = allow_multiple,
   })
 
@@ -182,7 +187,7 @@ local function choose_startup_project_manually(cwd)
     return
   end
 
-  local project_path = vim.fn.fnamemodify(project_file, ':h')
+  local project_path = vim.fn.fnamemodify(project_file, ":h")
 
   return project_path
 end
@@ -197,7 +202,7 @@ local select_dll = function()
   local cwd = nil
 
   for _, client in pairs(lsp_clients) do
-    if client.name == 'roslyn' or client.name == 'omnisharp' then
+    if client.name == "roslyn" or client.name == "omnisharp" then
       cwd = client.config.root_dir
       break
     end
@@ -207,7 +212,7 @@ local select_dll = function()
     cwd = vim.fn.getcwd()
   end
 
-  local launch_settings_file = vim.fs.find('launchSettings.json', { path = cwd, type = 'file' })
+  local launch_settings_file = vim.fs.find("launchSettings.json", { path = cwd, type = "file" })
   local project_root = nil
   local env_vars = nil
 
@@ -215,7 +220,7 @@ local select_dll = function()
     local settings_file_path = launch_settings_file[1]
     local json_string = read_json_file(settings_file_path)
     if not json_string then
-      print 'Error: Could not read launchSettings.json.'
+      print("Error: Could not read launchSettings.json.")
       return
     end
 
@@ -224,7 +229,7 @@ local select_dll = function()
     local selected_profile = nil
     if launch_settings and launch_settings.profiles then
       for _, profile in pairs(launch_settings.profiles) do
-        if profile.commandName == 'Project' then
+        if profile.commandName == "Project" then
           selected_profile = profile
           break
         end
@@ -232,12 +237,12 @@ local select_dll = function()
     end
 
     if not selected_profile then
-      print "Error: Could not find a 'Project' launch profile."
+      print("Error: Could not find a 'Project' launch profile.")
       return
     end
 
     env_vars = selected_profile.environmentVariables or {
-      ASPNETCORE_ENVIRONMENT = 'Development',
+      ASPNETCORE_ENVIRONMENT = "Development",
     }
 
     if selected_profile.applicationUrl then
@@ -256,13 +261,13 @@ local select_dll = function()
   end
 
   local project_path = vim.fs.find(find_csproj, { path = project_root })[1]
-  local project_name = vim.fn.fnamemodify(project_path, ':t:r')
+  local project_name = vim.fn.fnamemodify(project_path, ":t:r")
 
   -- TODO: till here?
 
-  local dll_root = project_root .. '/bin/Debug'
-  local dll_file = vim.fs.find(string.format('%s.dll', project_name),
-    { path = dll_root, limit = math.huge, type = 'file' })
+  local dll_root = project_root .. "/bin/Debug"
+  local dll_file =
+      vim.fs.find(string.format("%s.dll", project_name), { path = dll_root, limit = math.huge, type = "file" })
 
   local dll_path = nil
 
@@ -270,13 +275,13 @@ local select_dll = function()
     if #dll_file > 1 then
       dll_path = select_file(dll_file, {
         empty_message = 'No dotnet DLLs found in the "bin" directory. Ensure project has been built.',
-        title_message = 'Select .NET Version:',
+        title_message = "Select .NET Version:",
       })
     else
       dll_path = dll_file[1]
     end
   else
-    print 'Could not find DLL'
+    print("Could not find DLL")
     return
   end
 
@@ -292,11 +297,11 @@ end
 local setup_configuration = function(dap, dap_utils, config)
   dap.configurations.cs = {
     setmetatable({
-      type = 'coreclr',
-      name = 'Launch Project',
-      request = 'launch',
-      program = '${file}',
-      cwd = '${fileDirname}',
+      type = "coreclr",
+      name = "Launch Project",
+      request = "launch",
+      program = "${file}",
+      cwd = "${fileDirname}",
       env = {},
     }, {
       __call = function(config)
@@ -308,9 +313,9 @@ local setup_configuration = function(dap, dap_utils, config)
       end,
     }),
     {
-      type = 'coreclr',
-      name = 'Attach to Process',
-      request = 'attach',
+      type = "coreclr",
+      name = "Attach to Process",
+      request = "attach",
       processId = dap_utils.pick_process,
     },
   }
@@ -320,7 +325,7 @@ local setup_configuration = function(dap, dap_utils, config)
   end
 
   for _, dap_config in ipairs(config.dap_configurations) do
-    if dap_config.type == 'coreclr' then
+    if dap_config.type == "coreclr" then
       table.insert(dap.configurations.cs, dap_config)
     end
   end
@@ -333,9 +338,9 @@ end
 --- @field config.netcoredbg.path string The path to the `netcoredbg` executable.
 local setup_adapter = function(dap, config)
   local adapter = {
-    type = 'executable',
+    type = "executable",
     command = config.netcoredbg.path,
-    args = { '--interpreter=vscode' },
+    args = { "--interpreter=vscode" },
   }
 
   dap.adapters.coreclr = adapter
@@ -349,10 +354,9 @@ end
 --- @field opts.netcoredbg.path string Path to the `netcoredbg` executable.
 --- @field opts.dap_configurations table[] Optional list of additional configurations to add to the 'cs' filetype.
 function M.setup(opts)
-  local config = vim.tbl_deep_extend('force', default_config, opts or {})
-  local dap = load_module 'dap'
-  local dap_utils = load_module 'dap.utils'
-  load_module 'cjson'
+  local config = vim.tbl_deep_extend("force", default_config, opts or {})
+  local dap = load_module("dap")
+  local dap_utils = load_module("dap.utils")
   setup_adapter(dap, config)
   setup_configuration(dap, dap_utils, config)
 end
