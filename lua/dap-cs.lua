@@ -12,9 +12,9 @@ if vim.fn.has("win32") == 1 then
 end
 
 --- @section Plugin Configuration
+--- @class default_config Path config to Netcoredbg.
 --- @field netcoredbg table The configuration for the `netcoredbg` executable.
 --- @field netcoredbg.path string The path to the `netcoredbg` executable. Defaults to 'netcoredbg'.
---- @field dap_configurations table[] A list of additional DAP configurations to be added to the 'cs' filetype.
 local default_config = {
   netcoredbg = {
     path = executable,
@@ -79,12 +79,14 @@ local display_selection = function(prompt_title, options)
   end
 end
 
+--- @class Display_Options
+--- @field empty_message string A message to print if no files are found.
+--- @field title_message string A title for the selection list if multiple results are found.
+--- @field allow_multiple boolean If true, returns all results without prompting for selection.
+
 --- @brief Selects a file or list of files from a set of results.
 --- @param results string|string[] The file path(s) to be selected from.
---- @param opts table A table of options to customize behavior.
---- @field opts.empty_message string A message to print if no files are found.
---- @field opts.title_message string A title for the selection list if multiple results are found.
---- @field opts.allow_multiple boolean If true, returns all results without prompting for selection.
+--- @param opts Display_Options table of options to customize behavior.
 --- @return string|string[]|nil result The selected file path, a list of file paths if `allow_multiple` is true, or nil.
 local select_file = function(results, opts)
   if type(results) ~= "table" then
@@ -125,7 +127,7 @@ end
 --- @brief Searches for C# project files in a given directory and prompts the user for a selection if needed.
 --- @param cwd string The directory to start the search from.
 --- @param allow_multiple boolean If true, returns all found project files instead of a single selection.
---- @return string|string[]|nil project_file The selected project file path(s) or nil.
+--- @return table startup_projects The selected project file path(s) or nil.
 local find_startup_projects = function(cwd, allow_multiple)
   local project_files = vim.fs.find(find_csproj, { path = cwd, limit = math.huge, type = "file" })
 
@@ -194,7 +196,7 @@ end
 
 --- @brief Finds and selects a .NET DLL for a project in the current working directory.
 --- This function handles both `launchSettings.json` and console app scenarios.
---- @return string|nil dll_path The path to the selected DLL or nil.
+--- @return string|string[]|nil dll_path The path to the selected DLL or nil.
 --- @return string|nil project_path The path to the project directory or nil.
 --- @return table|nil env_vars The environment variables from `launchSettings.json` or nil.
 local select_dll = function()
@@ -331,11 +333,9 @@ local setup_configuration = function(dap, dap_utils, config)
   end
 end
 
---- @brief Sets up the `coreclr` debug adapter for Neovim's DAP.
+--- @brief Sets up the `coreclr` and `netcoredbg` debug adapters for Neovim's DAP.
 --- @param dap table The `dap` module.
 --- @param config table The plugin configuration table.
---- @field config.netcoredbg table The configuration for the `netcoredbg` executable.
---- @field config.netcoredbg.path string The path to the `netcoredbg` executable.
 local setup_adapter = function(dap, config)
   local adapter = {
     type = "executable",
@@ -350,9 +350,6 @@ end
 --- @brief The main entry point for setting up the debugger plugin.
 --- This function merges user options with defaults, loads dependencies, and sets up the DAP adapter and configurations.
 --- @param opts table A table of user options to override the defaults.
---- @field opts.netcoredbg table Configuration for `netcoredbg` path.
---- @field opts.netcoredbg.path string Path to the `netcoredbg` executable.
---- @field opts.dap_configurations table[] Optional list of additional configurations to add to the 'cs' filetype.
 function M.setup(opts)
   local config = vim.tbl_deep_extend("force", default_config, opts or {})
   local dap = load_module("dap")

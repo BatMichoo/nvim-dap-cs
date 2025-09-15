@@ -9,7 +9,6 @@ An extension for [nvim-dap][1] providing adapter and configurations for launchin
 
 - Launch a .NET Core project
 - Attach to a .NET Core process
-- Smart attach to a .NET Core process
 
 ### Requirements
 
